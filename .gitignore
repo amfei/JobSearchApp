@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.dist/
+.build/
+.pytest_cache/
+.mypy_cache/
+.cache/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs & data
+*.log
+*.sqlite
+*.db
+*.csv
+*.parquet
+*.pickle
+*.pkl
+
+# Project artifacts
+.chroma/
+cache/
+data/
+outputs/
+artifacts/
+
+# Secrets (critical)
+.env
+*.env
+*.key
+*.pem
+*.crt
+credentials.json
+service_account.json
+
+# Streamlit local secrets (Cloud uses dashboard)
+.streamlit/secrets.toml

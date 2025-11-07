@@ -4,7 +4,7 @@ Key Features
 
 Automatic CV text extraction (PDF)
 
-Job scraping via Requests / Selenium
+Job scraping 
 
 Hybrid BM25 + Sentence-Transformer ranking
 

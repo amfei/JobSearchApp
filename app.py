@@ -1,35 +1,54 @@
+import os
 import streamlit as st
 from datetime import datetime
 from sentence_transformers import SentenceTransformer
 
-# --- Local pipeline imports ---
+# =====================================================
+# ⚙️ Environment & Telemetry Configuration
+# =====================================================
+os.environ["CHROMA_TELEMETRY_ENABLED"] = "false"
+os.environ["ANONYMIZED_TELEMETRY"] = "false"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "1"   # Increase Hugging Face timeout
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"  # Faster downloads
+
+# =====================================================
+# 📦 Local Imports
+# =====================================================
 from pipeline.config import CFG
 from pipeline.cv_reader import extract_text_from_pdf
-from pipeline.sources.boards import fetch_linkedin_jobs as fetch_jobs  # ✅ unified import
-from pipeline.vectordb import get_collection, store_jobs, read_jobs
+from pipeline.sources.boards import fetch_linkedin_jobs as fetch_jobs
+from pipeline.vectordb import get_collection, store_jobs, read_jobs, clear_all_jobs
 from pipeline.ranker import hybrid_rank
 from pipeline.email_utils import send_email
 
 
-# ======================
-# 🔧 Streamlit Settings
-# ======================
+# =====================================================
+# 🧭 Streamlit Page Configuration
+# =====================================================
 st.set_page_config(page_title="Job Search Ranker", page_icon="🧭", layout="wide")
 st.title("🧭 AI-Assisted Job Search Ranker")
 
-# ======================
-# 🎛️ Sidebar Controls
-# ======================
+
+# =====================================================
+# 🎛 Sidebar Controls
+# =====================================================
 with st.sidebar:
     st.subheader("Search Settings")
 
-    default_titles = ["Data Scientist"]
-    titles = st.text_input("Job titles (comma-separated)", ", ".join(default_titles)).split(",")
-    titles = [t.strip() for t in titles if t.strip()]
+    titles = [
+        t.strip() for t in st.text_input(
+            "Job titles (comma-separated)", 
+            "Data Scientist"
+        ).split(",") if t.strip()
+    ]
 
-    default_locs = ["Quebec", "Ontario"]
-    locations = st.text_input("Locations (comma-separated)", ", ".join(default_locs)).split(",")
-    locations = [l.strip() for l in locations if l.strip()]
+    locations = [
+        l.strip() for l in st.text_input(
+            "Locations (comma-separated)", 
+            "Quebec, Ontario"
+        ).split(",") if l.strip()
+    ]
 
     days_filter = st.number_input("Days posted ≤", 1, 60, 12)
     top_n = st.slider("Top N results", 5, 50, 20)
@@ -42,31 +61,40 @@ with st.sidebar:
     recip = st.text_input("Recipient email", value=CFG["RECIPIENT_EMAIL"] or "")
 
     st.markdown("---")
-    st.caption("📄 Upload your CV (PDF) or use the one from `.env` path.")
+    st.caption("📎 Upload your CV (PDF). Required for job ranking.")
 
 
-# ======================
-# 📄 CV Upload & Parsing
-# ======================
-cv_file = st.file_uploader("Upload CV (PDF)", type=["pdf"])
-if cv_file:
-    with open("uploaded_cv.pdf", "wb") as f:
-        f.write(cv_file.read())
-    cv_text = extract_text_from_pdf("uploaded_cv.pdf")
-else:
-    cv_text = extract_text_from_pdf(CFG["CV_PDF_PATH"])
+# =====================================================
+# 📄 Step 1: Upload CV
+# =====================================================
+st.markdown("### 📄 Step 1: Upload Your CV")
 
-if cv_text:
-    st.success(f"✅ CV loaded successfully ({len(cv_text)} characters)")
-else:
-    st.warning("⚠️ CV text is empty or invalid PDF provided")
+cv_file = st.file_uploader(
+    "Upload your CV in PDF format",
+    type=["pdf"],
+    help="The CV text will be extracted automatically for job matching."
+)
 
-st.divider()
+if not cv_file:
+    st.warning("⚠️ Please upload your CV to proceed.")
+    st.stop()
+
+os.makedirs("data", exist_ok=True)
+temp_path = os.path.join("data", f"cv_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+with open(temp_path, "wb") as f:
+    f.write(cv_file.read())
+
+try:
+    cv_text = extract_text_from_pdf(temp_path)
+    st.success(f"✅ CV uploaded and text extracted ({len(cv_text)} characters).")
+except Exception as e:
+    st.error(f"❌ Failed to read CV: {e}")
+    st.stop()
 
 
-# ======================
-# 🧠 Load Models & DB
-# ======================
+# =====================================================
+# 🤖 Model & Database Initialization
+# =====================================================
 @st.cache_resource(show_spinner="Loading embedding model...")
 def get_embed(model_name: str):
     return SentenceTransformer(model_name)
@@ -81,9 +109,9 @@ def get_coll(path: str):
 coll = get_coll(CFG["CHROMA_DIR"])
 
 
-# ======================
-# 🚀 UI Buttons
-# ======================
+# =====================================================
+# 🧩 Action Buttons
+# =====================================================
 colA, colB, colC = st.columns(3)
 with colA:
     do_fetch = st.button("🔎 Fetch Jobs")
@@ -93,13 +121,13 @@ with colC:
     do_email = st.button("📧 Email Results")
 
 
-# ======================
-# 🔍 Fetch LinkedIn Jobs
-# ======================
+# =====================================================
+# 🌐 Fetch LinkedIn Jobs
+# =====================================================
 jobs = []
 if do_fetch:
     st.info("Fetching jobs from LinkedIn...")
-    with st.spinner("Scraping in progress... (this may take up to a few minutes)"):
+    with st.spinner("⏳ Scraping in progress... this may take a few minutes..."):
         jobs = fetch_jobs(
             job_titles=titles,
             locations=locations,
@@ -108,29 +136,33 @@ if do_fetch:
             excluded_titles=[
                 "Data Engineer", "Junior", "Intern", "Manager", "Head", "Director", "VP"
             ],
-            use_selenium=use_selenium
+            use_selenium=use_selenium,
         )
-        if scrape_always and jobs:
+
+    if jobs:
+        if scrape_always:
             n = store_jobs(coll, jobs, embed)
-            st.success(f"✅ {n} jobs stored in vector database")
+            st.success(f"✅ {n} jobs stored in vector database.")
         else:
-            st.warning("No new jobs found or scrape skipped.")
+            st.info("ℹ️ Scrape complete — reusing existing database.")
+    else:
+        st.warning("⚠️ No new jobs found or scraping failed.")
 
 
-# ======================
-# 💾 Load Stored Jobs
-# ======================
+# =====================================================
+# 📂 Read Stored Jobs
+# =====================================================
 stored = read_jobs(coll)
-st.write(f"📦 Jobs currently in database: **{len(stored)}**")
+st.write(f"🗂️ Jobs currently in database: **{len(stored)}**")
 
 
-# ======================
-# 🧩 Rank by Relevance
-# ======================
+# =====================================================
+# 🧠 Rank Jobs
+# =====================================================
 ranked = []
 if do_rank:
     st.info("Ranking jobs based on CV relevance...")
-    with st.spinner("Calculating hybrid BM25 + semantic scores..."):
+    with st.spinner("⚙️ Calculating hybrid BM25 + semantic similarity..."):
         ranked = hybrid_rank(cv_text, stored, embed, top_n=top_n)
 
     if not ranked:
@@ -140,21 +172,21 @@ if do_rank:
         for i, (score, job) in enumerate(ranked, 1):
             st.markdown(
                 f"**{i}. {job['title']}** — {job['company']} · {job['location']}  \n"
-                f"💡 Score: `{score:.4f}`  \n"
-                f"[🔗 View Job Posting]({job['link']})"
+                f"Score: `{score:.4f}`  \n"
+                f"[View Job Posting]({job['link']})"
             )
 
 
-# ======================
+# =====================================================
 # 📧 Send Email Results
-# ======================
+# =====================================================
 if do_email:
     if not ranked:
         ranked = hybrid_rank(cv_text, stored, embed, top_n=top_n)
 
     lines = [f"Top Job Matches — {datetime.now():%Y-%m-%d %H:%M}"]
     for i, (score, j) in enumerate(ranked, 1):
-        tag = " ⭐ HIGH PRIORITY" if score > 0.7 else ""
+        tag = " (High Priority)" if score > 0.7 else ""
         lines.append(f"{i}. {j['title']} at {j['company']} ({j['location']}) — Score {score:.4f}{tag}")
         lines.append(f"   {j['link']}")
     body = "\n".join(lines)
@@ -167,9 +199,25 @@ if do_email:
         recipient=recip or CFG["RECIPIENT_EMAIL"],
         subject="Daily AI-Powered Job Matches",
         body=body,
-        enable=send_mail
+        enable=send_mail,
     )
+
     if ok and send_mail:
-        st.success("✅ Email sent successfully!")
+        st.success("✅ Email sent successfully.")
     else:
         st.info("📭 Dry-run mode — email preview only.")
+
+
+# =====================================================
+# 🧹 Database Maintenance
+# =====================================================
+st.markdown("---")
+st.subheader("🧹 Database Maintenance")
+
+if st.button("Clean Database (Full Reset)"):
+    with st.spinner("Deleting all jobs from database..."):
+        ok = clear_all_jobs(coll)
+        if ok:
+            st.success("✅ Database cleared successfully.")
+        else:
+            st.error("❌ Failed to clean database.")

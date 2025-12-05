@@ -1,10 +1,10 @@
 AI-Assisted Job Search Ranker
-A Streamlit-based intelligent job-matching tool that reads your CV, scrapes job postings (e.g., from LinkedIn), and ranks them by relevance using both keyword and semantic similarity. It can also email you the top matches daily.
+A Streamlit-based intelligent job-matching tool that reads your CV, extracts job postings, and ranks them by relevance using both keyword and semantic similarity. It can also email you the top matches daily.
 Key Features
 
 Automatic CV text extraction (PDF)
 
-Job scraping via Requests / Selenium
+Job extracts via Requests / Selenium
 
 Hybrid BM25 + Sentence-Transformer ranking
 
